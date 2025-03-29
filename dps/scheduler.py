@@ -1,12 +1,33 @@
+from typing import Literal
+
+import torch
+
+from dps.policies.random_policy import RandomPolicy
+from dps.utils.precision import Precision, map_to_dtype
+
+
 class DynamicPrecisionScheduler:
-    def __init__(self, policy, network_monitor, model_info, total_steps: int):
+    def __init__(
+        self,
+        policy,  #: Literal["random", "constant", "rl", "heuristic"],
+        network_monitor,
+        model_info,
+        total_steps: int,
+    ):
         self.policy = policy
         self.network_monitor = network_monitor
         self.model_info = model_info
         self.training_step = 0
         self.total_steps = total_steps
 
-    def get_precision(self, src_device, dst_device, tensor_info, is_backward=False):
+    def get_precision(
+        self,
+        src_device,
+        dst_device,
+        tensor_info,
+        is_backward=False,
+        return_dtype: bool = True,
+    ):
         """
         Determine the precision to use for communication.
 
@@ -35,7 +56,26 @@ class DynamicPrecisionScheduler:
             src_dst_pair=(src_device, dst_device),
         )
 
+        if return_dtype:
+            return map_to_dtype(precision)
         return precision
 
     def update_step(self, update: int = 1):
         self.training_step += update
+
+
+class DummyScheduler(DynamicPrecisionScheduler):
+    def __init__(
+        self,
+        policy,
+        network_monitor,
+        model_info,
+        total_steps: int,
+        default_precision: Precision = Precision.BFLOAT16,
+    ):
+        super().__init__(policy, network_monitor, model_info, total_steps)
+        self.default_precision = default_precision
+
+    def get_precision(self, src_device, dst_device, tensor_info, is_backward=False):
+        """Dummy precision scheduler will return the default precision"""
+        return self.default_precision

@@ -6,6 +6,8 @@ from typing import Dict, List, Literal, Optional, Union
 
 @dataclass
 class Config:
+    master_addr: str = field(default="localhost")
+    master_port: str = field(default="1111")
     # Basic settings
     model_name: str = field(
         default="resnet20", metadata={"help": "Base model used for generation"}
@@ -27,6 +29,9 @@ class Config:
     resume_dir: Optional[str] = field(
         default=None, metadata={"help": "Directory to resume training from"}
     )
+    output_dir: Optional[str] = field(
+        default="./results", metadata={"help": "Directory to log training runs to"}
+    )
     experiment_name: str = field(
         default="dps_default", metadata={"help": "Name for this experiment"}
     )
@@ -34,7 +39,9 @@ class Config:
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = field(
         default="INFO", metadata={"help": "Logging level"}
     )
-
+    num_gpus: int = field(
+        default=4, metadata={"help": "Total number of GPUs available to the job."}
+    )
     # Network settings
     network_topology: Literal["flat", "tree", "fattree", "torus"] = field(
         default="fattree", metadata={"help": "Network topology type"}
@@ -58,6 +65,8 @@ class Config:
     congestion_pattern: Literal["random", "periodic", "bursty"] = field(
         default="bursty", metadata={"help": "Pattern of network congestion to simulate"}
     )
+    high_congestion_threshold: float = field(default=0.8)
+    extreme_congestion_threshold: float = field(default=0.9)
 
     # Model settings
     model_type: Literal["cnn", "transformer", "mlp"] = field(
@@ -85,11 +94,28 @@ class Config:
         default=1.5,
         metadata={"help": "Factor to increase precision importance in backward pass"},
     )
+    eval_dtype: Literal["bfloat16", "float16", "float32"] = field(
+        default="bfloat16",
+        metadata={"help": "Floating point number format used for evaluation"},
+    )
 
     # Training settings
+    seed: int = field(default=42)
     batch_size: int = field(default=32, metadata={"help": "Training batch size"})
-    num_epochs: int = field(default=10, metadata={"help": "Number of training epochs"})
-    learning_rate: float = field(default=0.001, metadata={"help": "Learning rate"})
+    # Todo: change to num_steps
+    num_train_steps: int = field(
+        default=1000, metadata={"help": "Number of training steps"}
+    )
+    learning_rate: float = field(default=5e-5, metadata={"help": "Learning rate"})
+    warmup_ratio: float = field(default=0.1, metadata={"help": "Warmup ratio"})
+    lr_scheduler: str = field(default="linear")
+    max_grad_norm: float = field(
+        default=2.0, metadata={"help": "Maximum norm for gradient clipping"}
+    )
+    weight_decay: float = field(default=0.0, metadata={"help": "Weight decay"})
+    gradient_accumulation_steps: int = field(
+        default=1, metadata={"help": "Grad. accim. steps"}
+    )
     optimizer: Literal["adam", "sgd"] = field(
         default="adam", metadata={"help": "Optimizer to use"}
     )
@@ -98,6 +124,9 @@ class Config:
     )
     tensor_parallel_size: int = field(
         default=4, metadata={"help": "Number of devices for tensor parallelism"}
+    )
+    data_parallel_size: int = field(
+        default=1, metadata={"help": "Number of devices for data parallelism"}
     )
     reward_latency_weight: float = field(
         default=0.7, metadata={"help": "Weight for latency in reward function"}
@@ -130,3 +159,6 @@ class Config:
 
         # Convert string list to actual list
         self.precision_formats = self.precision_formats.split(",")
+
+        self.text_column_name = "text"
+        self.max_seq_length = 512
