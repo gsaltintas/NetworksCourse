@@ -15,6 +15,7 @@ from torch.utils.data import DataLoader, DistributedSampler
 from tqdm.auto import tqdm
 from transformers import HfArgumentParser, default_data_collator, get_scheduler
 
+from dps.training.allreduce import TPLinearLayer
 from dps.utils.config import Config
 from dps.utils.model_utils import load_model, load_tokenizer
 
@@ -117,12 +118,8 @@ def prepare_datasets(
 
 
 # TODO: for some reason doesn't work
-def parallelize_model_with_fsdp(model, config, local_rank, world_size, mesh):
-    """Apply either tensor parallelism or FSDP, but not both"""
-
-    # Initialize process group if not already done
-    # if not dist.is_initialized():
-    #     dist.init_process_group(backend="nccl", rank=local_rank, world_size=world_size)
+def parallelize_model_with_tp(model, config, local_rank, world_size, mesh_2d):
+    """Apply tensor parallelism with custom allreduce"""
 
     # Calculate sizes
     tp_size = min(config.tensor_parallel_size, world_size)
@@ -131,72 +128,77 @@ def parallelize_model_with_fsdp(model, config, local_rank, world_size, mesh):
     # Move model to device first
     model = model.to(local_rank)
 
+    tp_mesh = mesh_2d["tp"]
+    dp_mesh = mesh_2d["dp"]
+
+    # Calculate ranks
+    tp_rank = tp_mesh.get_local_rank()
+    dp_rank = dp_mesh.get_local_rank()
+
+    # Track modules that require parallelization
+    for name, module in model.named_modules():
+        # Apply to linear layers based on their role
+        if isinstance(module, torch.nn.Linear):
+            parent_name = name.rsplit(".", 1)[0] if "." in name else ""
+            parent = model.get_submodule(parent_name) if parent_name else model
+            attr_name = name.split(".")[-1]
+
+            # Determine the parallelism strategy based on the module's role
+            if any(
+                pattern in name
+                for pattern in [
+                    "q_proj",
+                    "k_proj",
+                    "v_proj",
+                    "query",
+                    "key",
+                    "value",
+                    "up_proj",
+                    "gate_proj",
+                ]
+            ):
+                # Column-wise splitting (output dimension)
+                tp_layer = TPLinearLayer(
+                    module,
+                    tp_mesh.get_group(),
+                    tp_size,
+                    tp_rank,
+                    split_dim=0,
+                    precision="fp16",  # Use fp16 for communication
+                )
+                setattr(parent, attr_name, tp_layer)
+
+            elif any(
+                pattern in name
+                for pattern in ["o_proj", "out_proj", "output", "down_proj"]
+            ):
+                # Row-wise splitting (input dimension)
+                tp_layer = TPLinearLayer(
+                    module,
+                    tp_mesh.get_group(),
+                    tp_size,
+                    tp_rank,
+                    split_dim=1,
+                    precision="fp16",  # Use fp16 for communication
+                )
+                setattr(parent, attr_name, tp_layer)
+    ## TODO: apply DDP on top anyways?
+    # Apply FSDP if desired
     try:
-        # Create a 1D mesh for tensor parallelism
-        # device_mesh = dist.DeviceMesh("cuda", (tp_size,))
-        # device_mesh = mesh._flatten("tp")
-        device_mesh = mesh["tp"]._flatten()["tp"]
-        # Define explicit parallelization plan for transformer models like LLaMA
-        parallel_plan = {}
-
-        # Track modules that require parallelization
-        for name, module in model.named_modules():
-            # LLaMA/transformer specific parallelization
-            if isinstance(module, torch.nn.Linear):
-                # QKV projections - Colwise parallelism (split output features)
-                if any(
-                    attn_name in name
-                    for attn_name in [
-                        "q_proj",
-                        "k_proj",
-                        "v_proj",
-                        "query",
-                        "key",
-                        "value",
-                    ]
-                ):
-                    parallel_plan[name] = dist.tensor.parallel.ColwiseParallel()
-
-                # Output projections - Rowwise parallelism (split input features)
-                elif any(
-                    out_name in name for out_name in ["o_proj", "out_proj", "output"]
-                ):
-                    parallel_plan[name] = dist.tensor.parallel.RowwiseParallel()
-
-                # MLP layers
-                elif any(
-                    mlp_name in name
-                    for mlp_name in ["up_proj", "gate_proj", "down_proj", "mlp"]
-                ):
-                    # Up/gate projections - Colwise (split output features)
-                    if any(up_name in name for up_name in ["up_proj", "gate_proj"]):
-                        parallel_plan[name] = dist.tensor.parallel.ColwiseParallel()
-                    # Down projections - Rowwise (split input features)
-                    elif "down_proj" in name:
-                        parallel_plan[name] = dist.tensor.parallel.RowwiseParallel()
-
-        logger.info(
-            f"Applying tensor parallelism with plan for {len(parallel_plan)} modules"
-        )
-
-        # Apply tensor parallelism
-        model = dist.tensor.parallel.parallelize_module(
-            model, device_mesh, parallel_plan
-        )
-        # model = FSDP(
-        #     model, device_mesh=mesh, sharding_strategy=ShardingStrategy.HYBRID_SHARD
-        # )
-        model = dist.fsdp.fully_shard(model, mesh=mesh["dp"])
-        logger.info("Model parallelized with tensor parallelism")
-
-        # Return with TP rank info
-        tp_rank = local_rank % tp_size
-        dp_rank = local_rank // tp_size
-        print(tp_rank, dp_rank)
-        return model, dp_rank, tp_rank
-
+        model = dist.fsdp.fully_shard(model, mesh=dp_mesh)
+        logger.info("Model sharded with FSDP")
     except Exception as e:
-        raise RuntimeError(f"Error applying tensor parallelism: {e}")
+        logger.warning(f"Error applying FSDP: {e}")
+        # Fallback to DDP
+        model = torch.nn.parallel.DistributedDataParallel(
+            model,
+            device_ids=[local_rank],
+            output_device=local_rank,
+            process_group=dp_mesh.get_group(),
+        )
+        logger.info("Model wrapped with DDP")
+
+    return model, dp_rank, tp_rank
 
 
 def setup_logging(config):
@@ -284,7 +286,10 @@ def main():
         tokenizer.pad_token = tokenizer.eos_token
     model = load_model(config.model_name)
     # Apply tensor parallelism and FSDP from the same mesh
-    model, dp_rank, tp_rank = parallelize_model_with_fsdp(
+    # model, dp_rank, tp_rank = parallelize_model_with_fsdp(
+    #     model, config, local_rank, world_size, mesh_2d
+    # )
+    model, dp_rank, tp_rank = parallelize_model_with_tp(
         model, config, local_rank, world_size, mesh_2d
     )
     logger.info("Model after parallelization %s", model)
@@ -343,7 +348,7 @@ def main():
         disable=not is_main_process,
         desc="Training",
     )
-
+    # TODO: add the scheduler
     # Training loop
     for epoch in range(epochs):
         # Reset the sampler for each epoch
@@ -356,8 +361,6 @@ def main():
 
             # Forward pass
             outputs = model(**batch)
-            # TODO: modify allreduce
-            # dist.all_reduce
             loss = outputs.loss
 
             # Normalize loss for gradient accumulation
