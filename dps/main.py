@@ -15,7 +15,11 @@ from torch.utils.data import DataLoader, DistributedSampler
 from tqdm.auto import tqdm
 from transformers import HfArgumentParser, default_data_collator, get_scheduler
 
-from dps.training.allreduce import TPLinearLayer
+from dps.scheduler import DynamicPrecisionScheduler
+from dps.training.allreduce import (
+    DynamicPrecisionTPLinearLayer,
+    register_backward_hooks,
+)
 from dps.utils.config import Config
 from dps.utils.model_utils import load_model, load_tokenizer
 
@@ -117,8 +121,10 @@ def prepare_datasets(
     return train_dataloader, eval_dataloader
 
 
-# TODO: for some reason doesn't work
-def parallelize_model_with_tp(model, config, local_rank, world_size, mesh_2d):
+# TODO: for some reason DDP part doesn't work
+def parallelize_model_with_tp(
+    model, config, local_rank, world_size, mesh_2d, scheduler
+):
     """Apply tensor parallelism with custom allreduce"""
 
     # Calculate sizes
@@ -158,13 +164,13 @@ def parallelize_model_with_tp(model, config, local_rank, world_size, mesh_2d):
                 ]
             ):
                 # Column-wise splitting (output dimension)
-                tp_layer = TPLinearLayer(
+                tp_layer = DynamicPrecisionTPLinearLayer(
                     module,
                     tp_mesh.get_group(),
                     tp_size,
                     tp_rank,
                     split_dim=0,
-                    precision="fp16",  # Use fp16 for communication
+                    scheduler=scheduler,
                 )
                 setattr(parent, attr_name, tp_layer)
 
@@ -173,13 +179,13 @@ def parallelize_model_with_tp(model, config, local_rank, world_size, mesh_2d):
                 for pattern in ["o_proj", "out_proj", "output", "down_proj"]
             ):
                 # Row-wise splitting (input dimension)
-                tp_layer = TPLinearLayer(
+                tp_layer = DynamicPrecisionTPLinearLayer(
                     module,
                     tp_mesh.get_group(),
                     tp_size,
                     tp_rank,
                     split_dim=1,
-                    precision="fp16",  # Use fp16 for communication
+                    scheduler=scheduler,
                 )
                 setattr(parent, attr_name, tp_layer)
     ## TODO: apply DDP on top anyways?
@@ -277,22 +283,15 @@ def main():
         wandb.init(
             project="networks-lm-finetuning",
             name=f"{config.model_name}-finetuning",
-            config=asdict(config.config),
+            config=asdict(config),
         )
+
     logger.info("Loading model and tokenizer from %s", config.model_name)
     tokenizer = load_tokenizer(config.model_name)
 
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
     model = load_model(config.model_name)
-    # Apply tensor parallelism and FSDP from the same mesh
-    # model, dp_rank, tp_rank = parallelize_model_with_fsdp(
-    #     model, config, local_rank, world_size, mesh_2d
-    # )
-    model, dp_rank, tp_rank = parallelize_model_with_tp(
-        model, config, local_rank, world_size, mesh_2d
-    )
-    logger.info("Model after parallelization %s", model)
     train_dataloader, eval_dataloader = prepare_datasets(
         config,
         dp_size,
@@ -302,6 +301,46 @@ def main():
         tokenizer,
     )
     total_steps = config.num_train_steps
+    # Calculate steps per epoch considering gradient accumulation
+    num_update_steps_per_epoch = math.ceil(
+        len(train_dataloader) / config.gradient_accumulation_steps
+    )
+    # Calculate epochs needed to reach total steps
+    epochs = math.ceil(total_steps / num_update_steps_per_epoch)
+    # Setup progress bar
+    progress_bar = tqdm(
+        total=num_update_steps_per_epoch,
+        disable=not is_main_process,
+        desc="Training",
+        leave=True,
+    )
+
+    # Initialize dynamic precision scheduler
+    # Collect model info for the scheduler
+    model_info = {
+        "model_name": config.model_name,
+        "hidden_size": model.config.hidden_size
+        if hasattr(model.config, "hidden_size")
+        else 0,
+        "num_layers": model.config.num_hidden_layers
+        if hasattr(model.config, "num_hidden_layers")
+        else 0,
+    }
+
+    # Create precision scheduler
+    precision_scheduler = DynamicPrecisionScheduler(
+        config=config, model_info=model_info, total_steps=total_steps
+    )
+    model, dp_rank, tp_rank = parallelize_model_with_tp(
+        model, config, local_rank, world_size, mesh_2d, precision_scheduler
+    )
+
+    # Register backward hooks for dynamic precision
+    backward_hooks = register_backward_hooks(
+        model, precision_scheduler, tp_mesh.get_group()
+    )
+    logger.info("Model after parallelization %s", model)
+
     no_decay = ["bias", "LayerNorm.weight"]
     optimizer_grouped_parameters = [
         {
@@ -336,23 +375,11 @@ def main():
     model.train()
     total_loss = 0
     step_count = 0
-    # Get the number of training steps
-    num_update_steps_per_epoch = (
-        len(train_dataloader) // config.gradient_accumulation_steps
-    )
-    total_training_steps = total_steps * num_update_steps_per_epoch
-    epochs = max(1, math.ceil(total_training_steps / len(train_dataloader)))
-    # Setup progress bar
-    progress_bar = tqdm(
-        total=total_training_steps,
-        disable=not is_main_process,
-        desc="Training",
-    )
-    # TODO: add the scheduler
     # Training loop
     for epoch in range(epochs):
         # Reset the sampler for each epoch
         train_dataloader.sampler.set_epoch(epoch)
+        progress_bar.reset()
 
         for step, batch in enumerate(train_dataloader):
             # Move batch to device
@@ -375,9 +402,12 @@ def main():
                 lr_scheduler.step()
                 optimizer.zero_grad()
 
+                # Update precision scheduler
+                precision_scheduler.update_step()
+
                 # Log progress
-                progress_bar.update(1)
                 step_count += 1
+                progress_bar.update(step_count)
 
                 if is_main_process and config.use_wandb:
                     wandb.log(
@@ -414,11 +444,23 @@ def main():
         # Break if we've reached total steps
         if step_count >= total_steps:
             break
+    # Clean up
+    for hook in backward_hooks:
+        hook.remove()
 
     # Save final model if needed
     if is_main_process:
         # Here you would save the model
         logger.info("Training completed")
+        output_dir = Path(config.output_dir) / f"{config.model_name}-finetuned"
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        dist.barrier()
+        # TODO: may hang check
+        # Save model
+        model_to_save = model.module if hasattr(model, "module") else model
+        model_to_save.save_pretrained(output_dir)
+        tokenizer.save_pretrained(output_dir)
 
 
 if __name__ == "__main__":

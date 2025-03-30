@@ -2,6 +2,9 @@ from typing import Literal
 
 import torch
 
+from dps.network.monitor import NetworkMonitor, Topology
+from dps.policies.constant_policy import ConstantPolicy
+from dps.policies.network_aware_policy import NetworkAwareHeuristicPolicy
 from dps.policies.random_policy import RandomPolicy
 from dps.utils.precision import Precision, map_to_dtype
 
@@ -9,16 +12,42 @@ from dps.utils.precision import Precision, map_to_dtype
 class DynamicPrecisionScheduler:
     def __init__(
         self,
-        policy,  #: Literal["random", "constant", "rl", "heuristic"],
-        network_monitor,
+        config,
         model_info,
         total_steps: int,
     ):
-        self.policy = policy
-        self.network_monitor = network_monitor
+        self.config = config
+        self.setup_policy(config.precision_policy)
+        self.setup_network_monitor()
         self.model_info = model_info
         self.training_step = 0
         self.total_steps = total_steps
+
+    def setup_policy(
+        self,
+        policy: Literal["random", "constant", "rl", "heuristic"],
+    ):
+        dps_policy = None
+        if policy == "random":
+            dps_policy = RandomPolicy(seed=self.config.seed)
+        elif policy == "constant":
+            dps_policy = ConstantPolicy(self.config.constant_dtype)
+        elif policy == "heuristic":
+            dps_policy = NetworkAwareHeuristicPolicy(
+                high_congestion_threshold=self.config.high_congestion_threshold,
+                extreme_congestion_threshold=self.config.extreme_congestion_threshold,
+            )
+        elif policy == "rl":
+            raise NotImplementedError("RL is under development")
+        else:
+            raise NotImplementedError(f"Invalid policy value {policy}.")
+        self.policy = dps_policy
+
+    def setup_network_monitor(
+        self,
+        topology: Topology = Topology.FAT_TREE,
+    ):
+        self.network_monitor = NetworkMonitor(topology=topology)
 
     def get_precision(
         self,
@@ -62,20 +91,3 @@ class DynamicPrecisionScheduler:
 
     def update_step(self, update: int = 1):
         self.training_step += update
-
-
-class DummyScheduler(DynamicPrecisionScheduler):
-    def __init__(
-        self,
-        policy,
-        network_monitor,
-        model_info,
-        total_steps: int,
-        default_precision: Precision = Precision.BFLOAT16,
-    ):
-        super().__init__(policy, network_monitor, model_info, total_steps)
-        self.default_precision = default_precision
-
-    def get_precision(self, src_device, dst_device, tensor_info, is_backward=False):
-        """Dummy precision scheduler will return the default precision"""
-        return self.default_precision

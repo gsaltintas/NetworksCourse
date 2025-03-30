@@ -1,108 +1,89 @@
 import torch
 import torch.distributed as dist
 
+from dps.network.monitor import NetworkMonitor
+from dps.scheduler import DynamicPrecisionScheduler
+from dps.utils.precision import Precision, map_to_dtype
 
-def mesh_allreduce(send, recv, device_mesh, precision=None):
+
+def dynamic_precision_allreduce(
+    send, recv, tp_group, scheduler, tensor_info=None, is_backward=False
+):
     """
-    Custom all-reduce implementation with device mesh support and optional precision control.
+    AllReduce with dynamic precision based on network conditions
 
     Args:
         send: Tensor to send
         recv: Tensor to receive result
-        device_mesh: DeviceMesh object containing device information
-        precision: Optional precision to use during communication ("fp16", "fp32", etc.)
+        tp_group: Process group or device mesh
+        scheduler: DynamicPrecisionScheduler instance
+        tensor_info: Information about the tensor being communicated
+        is_backward: Whether this is during backward pass
     """
-    # Extract mesh info
-    mesh_ranks = (
-        device_mesh.mesh.tolist()
-        if hasattr(device_mesh, "mesh")
-        else device_mesh.get_all_ranks()
-    )
-    rank = dist.get_rank()
-    size = len(mesh_ranks)
+    # Extract process group if needed
+    if hasattr(tp_group, "get_process_group"):
+        process_group = tp_group.get_process_group()
+    else:
+        process_group = tp_group
 
-    # Skip if running on a single device
-    if size <= 1:
+    # Get rank and world size
+    rank = dist.get_rank(process_group)
+    world_size = dist.get_world_size(process_group)
+
+    # Skip if singleton
+    if world_size <= 1:
         recv.copy_(send)
         return
 
-    # Convert to target precision for communication if specified
-    if precision is not None:
-        if precision == "fp16" and send.dtype == torch.float32:
-            send_buff = send.clone().half()
-            recv_buff = send.clone().half()
-            accum = send.clone().half()
-        else:
-            send_buff = send.clone()
-            recv_buff = send.clone()
-            accum = send.clone()
+    # Get source and destination devices
+    # In a standard TP scenario, communication happens with neighbors
+    next_rank = (rank + 1) % world_size
+    prev_rank = (rank - 1) % world_size
+
+    # Prepare default tensor info if not provided
+    if tensor_info is None:
+        tensor_info = {
+            "shape": list(send.shape),
+            "size_bytes": send.element_size() * send.nelement(),
+            "layer_type": "unknown",
+        }
+
+    # Determine precision for communication
+    communication_dtype = scheduler.get_precision(
+        src_device=rank,
+        dst_device=next_rank,
+        tensor_info=tensor_info,
+        is_backward=is_backward,
+        return_dtype=True,
+    )
+
+    # Convert to target precision for communication
+    if communication_dtype != send.dtype:
+        send_converted = send.to(communication_dtype)
     else:
-        send_buff = send.clone()
-        recv_buff = send.clone()
-        accum = send.clone()
+        send_converted = send.clone()
 
-    # Find position in mesh ranks
-    my_index = mesh_ranks.index(rank) if rank in mesh_ranks else 0
-
-    # Compute left and right neighbors in the ring
-    left_index = (my_index - 1) % size
-    right_index = (my_index + 1) % size
-    left = mesh_ranks[left_index]
-    right = mesh_ranks[right_index]
-
-    # Perform ring allreduce
-    for i in range(size - 1):
-        if i % 2 == 0:
-            # Send send_buff
-            send_req = dist.isend(send_buff, right)
-            dist.recv(recv_buff, left)
-            accum.add_(recv_buff)
-        else:
-            # Send recv_buff
-            send_req = dist.isend(recv_buff, right)
-            dist.recv(send_buff, left)
-            accum.add_(send_buff)
-        send_req.wait()
+    # Use standard all_reduce for reliability
+    dist.all_reduce(send_converted, op=dist.ReduceOp.SUM, group=process_group)
 
     # Convert back to original precision if needed
-    if precision is not None and precision == "fp16" and send.dtype == torch.float32:
-        recv.copy_(accum.float())
+    if communication_dtype != send.dtype:
+        recv.copy_(send_converted.to(send.dtype))
     else:
-        recv.copy_(accum)
+        recv.copy_(send_converted)
 
 
-# Integration with tensor parallel implementation
-def tp_linear_forward(x, weight, bias, tp_group, split_dim=0, precision=None):
-    """
-    Forward pass for tensor-parallel linear layer with custom allreduce.
+class DynamicPrecisionTPLinearLayer(torch.nn.Module):
+    """Tensor-Parallel Linear Layer with dynamic precision communication"""
 
-    Args:
-        x: Input tensor
-        weight: Weight tensor
-        bias: Bias tensor or None
-        tp_group: Tensor parallel group or device mesh
-        split_dim: 0 for column-wise, 1 for row-wise
-        precision: Precision for communication ("fp16", "fp32", etc.)
-    """
-    output = torch.nn.functional.linear(x, weight, bias)
-
-    # For row-wise parallelism, we need all-reduce
-    if split_dim == 1:
-        result = torch.empty_like(output)
-        mesh_allreduce(output, result, tp_group, precision=precision)
-        return result
-
-    return output
-
-
-class TPLinearLayer(torch.nn.Module):
     def __init__(
-        self, linear_layer, tp_group, tp_size, tp_rank, split_dim=0, precision=None
+        self, linear_layer, tp_group, tp_size, tp_rank, split_dim=0, scheduler=None
     ):
         super().__init__()
         self.tp_group = tp_group
         self.split_dim = split_dim
-        self.precision = precision
+        self.scheduler = scheduler
+        self.layer_name = "unknown"  # Will be set during model parallelization
 
         # Get original dimensions
         self.in_features = linear_layer.in_features
@@ -151,11 +132,133 @@ class TPLinearLayer(torch.nn.Module):
             self.in_features = end_idx - start_idx
 
     def forward(self, x):
+        """Forward pass with dynamic precision all-reduce for row-wise parallelism"""
+        # Regular linear operation
         output = torch.nn.functional.linear(x, self.weight, self.bias)
 
         # For row-wise parallelism, we need all-reduce
-        if self.split_dim == 1:
-            # Use simple all_reduce without any custom handling
+        if self.split_dim == 1 and self.scheduler is not None:
+            tensor_info = {
+                "name": self.layer_name,
+                "shape": list(output.shape),
+                "size_bytes": output.element_size() * output.nelement(),
+                "layer_type": "linear_output",
+            }
+
+            # Create result tensor
+            result = torch.empty_like(output)
+
+            # Use dynamic precision all-reduce
+            dynamic_precision_allreduce(
+                output,
+                result,
+                self.tp_group,
+                self.scheduler,
+                tensor_info=tensor_info,
+                is_backward=False,
+            )
+            return result
+        elif self.split_dim == 1:
+            # If no scheduler, use standard all_reduce
             dist.all_reduce(output, op=dist.ReduceOp.SUM, group=self.tp_group)
 
         return output
+
+    def set_name(self, name):
+        """Set the layer name for better logging and tracking"""
+        self.layer_name = name
+        return self
+
+
+def apply_dynamic_precision_tp(model, tp_group, tp_size, tp_rank, scheduler=None):
+    """Apply tensor parallelism with dynamic precision to a transformer model"""
+    # Track modules that require parallelization
+    for name, module in model.named_modules():
+        # Apply to linear layers based on their role
+        if isinstance(module, torch.nn.Linear):
+            parent_name = name.rsplit(".", 1)[0] if "." in name else ""
+            parent = model.get_submodule(parent_name) if parent_name else model
+            attr_name = name.split(".")[-1]
+
+            # Determine the parallelism strategy based on the module's role
+            if any(
+                pattern in name
+                for pattern in [
+                    "q_proj",
+                    "k_proj",
+                    "v_proj",
+                    "query",
+                    "key",
+                    "value",
+                    "up_proj",
+                    "gate_proj",
+                ]
+            ):
+                # Column-wise splitting (output dim)
+                tp_layer = DynamicPrecisionTPLinearLayer(
+                    module, tp_group, tp_size, tp_rank, split_dim=0, scheduler=scheduler
+                ).set_name(name)
+                setattr(parent, attr_name, tp_layer)
+
+            elif any(
+                pattern in name
+                for pattern in ["o_proj", "out_proj", "output", "down_proj"]
+            ):
+                # Row-wise splitting (input dim)
+                tp_layer = DynamicPrecisionTPLinearLayer(
+                    module, tp_group, tp_size, tp_rank, split_dim=1, scheduler=scheduler
+                ).set_name(name)
+                setattr(parent, attr_name, tp_layer)
+
+    return model
+
+
+# Hook for backward pass to use dynamic precision
+class DynamicPrecisionBackwardHook:
+    def __init__(self, scheduler, tp_group):
+        self.scheduler = scheduler
+        self.tp_group = tp_group
+
+    def __call__(self, grad):
+        if grad is None:
+            return None
+
+        tensor_info = {
+            "name": "grad_tensor",
+            "shape": list(grad.shape),
+            "size_bytes": grad.element_size() * grad.nelement(),
+            "layer_type": "gradient",
+        }
+
+        result = torch.empty_like(grad)
+        dynamic_precision_allreduce(
+            grad,
+            result,
+            self.tp_group,
+            self.scheduler,
+            tensor_info=tensor_info,
+            is_backward=True,
+        )
+        return result
+
+
+def register_backward_hooks(model, scheduler, tp_group):
+    """Register backward hooks for dynamic precision in backward pass"""
+    hooks = []
+
+    # Attach hooks to parameters that need all-reduce in backward
+    for name, module in model.named_modules():
+        if isinstance(module, DynamicPrecisionTPLinearLayer) and module.split_dim == 1:
+            # For row-wise parallelism, we need to handle gradients in backward pass
+            hook = module.weight.register_hook(
+                DynamicPrecisionBackwardHook(scheduler, tp_group)
+            )
+            hooks.append(hook)
+
+            if module.bias is not None:
+                hook = module.bias.register_hook(
+                    DynamicPrecisionBackwardHook(scheduler, tp_group)
+                )
+                hooks.append(hook)
+
+    return hooks

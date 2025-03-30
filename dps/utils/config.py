@@ -49,9 +49,7 @@ class Config:
     num_devices: int = field(
         default=4, metadata={"help": "Total number of devices in the network"}
     )
-    devices_per_node: int = field(
-        default=4, metadata={"help": "Number of devices per node"}
-    )
+    # todo: these are not used yet
     bandwidth_intra_node: float = field(
         default=100.0,
         metadata={"help": "Bandwidth between devices in the same node (Gbps)"},
@@ -77,8 +75,8 @@ class Config:
     )
 
     # Precision settings
-    precision_policy: Literal["random", "static", "network_aware", "rl"] = field(
-        default="network_aware", metadata={"help": "Precision selection policy to use"}
+    precision_policy: Literal["random", "constant", "heuristic", "rl"] = field(
+        default="constant", metadata={"help": "Precision selection policy to use"}
     )
     precision_formats: str = field(
         default="FP32,FP16,FP8,INT4,INT2",
@@ -97,6 +95,12 @@ class Config:
     eval_dtype: Literal["bfloat16", "float16", "float32"] = field(
         default="bfloat16",
         metadata={"help": "Floating point number format used for evaluation"},
+    )
+    constant_dtype: Literal["bfloat16", "float16", "float32"] = field(
+        default="bfloat16",
+        metadata={
+            "help": "Floating point number format used for constant policy, only takes effect if policy == constant."
+        },
     )
 
     # Training settings
