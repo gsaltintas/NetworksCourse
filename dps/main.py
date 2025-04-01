@@ -61,7 +61,7 @@ def prepare_datasets(
             return_tensors="pt",
         )
 
-        # Create labels (for causal LM, labels are the same as input_ids)
+        # For a causal LM, huggingface shifts the labels for us.
         tokenized["labels"] = tokenized["input_ids"].clone()
 
         return tokenized
