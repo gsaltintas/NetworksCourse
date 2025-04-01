@@ -1,5 +1,7 @@
 from enum import Enum
 
+import torch
+
 
 class Precision(Enum):
     FP32 = "fp32"
@@ -23,3 +25,18 @@ PENALTIES = {
     Precision.INT4: -0.10,  # Significant penalty
     Precision.INT2: -0.20,  # Severe penalty
 }
+
+
+def map_to_dtype(precision: Precision):
+    dtype = torch.float32
+    if precision == Precision.FP16:
+        dtype = torch.float16
+    elif precision == Precision.BFLOAT16:
+        dtype = torch.bfloat16
+    elif precision == Precision.FP8:
+        dtype = torch.float8
+    elif precision == Precision.INT4:
+        dtype = torch.int4
+    elif precision == Precision.INT2:
+        dtype = torch.int2
+    return dtype

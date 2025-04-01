@@ -1,12 +1,62 @@
+from typing import Literal
+
+import torch
+
+from dps.network.monitor import NetworkMonitor, Topology
+from dps.policies.constant_policy import ConstantPolicy
+from dps.policies.network_aware_policy import NetworkAwareHeuristicPolicy
+from dps.policies.random_policy import RandomPolicy
+from dps.utils.precision import Precision, map_to_dtype
+
+
 class DynamicPrecisionScheduler:
-    def __init__(self, policy, network_monitor, model_info, total_steps: int):
-        self.policy = policy
-        self.network_monitor = network_monitor
+    def __init__(
+        self,
+        config,
+        model_info,
+        total_steps: int,
+    ):
+        self.config = config
+        self.setup_policy(config.precision_policy)
+        self.setup_network_monitor()
         self.model_info = model_info
         self.training_step = 0
         self.total_steps = total_steps
 
-    def get_precision(self, src_device, dst_device, tensor_info, is_backward=False):
+    def setup_policy(
+        self,
+        policy: Literal["random", "constant", "rl", "heuristic"],
+    ):
+        dps_policy = None
+        if policy == "random":
+            dps_policy = RandomPolicy(seed=self.config.seed)
+        elif policy == "constant":
+            dps_policy = ConstantPolicy(self.config.constant_dtype)
+        elif policy == "heuristic":
+            dps_policy = NetworkAwareHeuristicPolicy(
+                high_congestion_threshold=self.config.high_congestion_threshold,
+                extreme_congestion_threshold=self.config.extreme_congestion_threshold,
+            )
+        elif policy == "rl":
+            raise NotImplementedError("RL is under development")
+        else:
+            raise NotImplementedError(f"Invalid policy value {policy}.")
+        self.policy = dps_policy
+
+    def setup_network_monitor(
+        self,
+        topology: Topology = Topology.FAT_TREE,
+    ):
+        self.network_monitor = NetworkMonitor(topology=topology)
+
+    def get_precision(
+        self,
+        src_device,
+        dst_device,
+        tensor_info,
+        is_backward=False,
+        return_dtype: bool = True,
+    ):
         """
         Determine the precision to use for communication.
 
@@ -35,6 +85,8 @@ class DynamicPrecisionScheduler:
             src_dst_pair=(src_device, dst_device),
         )
 
+        if return_dtype:
+            return map_to_dtype(precision)
         return precision
 
     def update_step(self, update: int = 1):

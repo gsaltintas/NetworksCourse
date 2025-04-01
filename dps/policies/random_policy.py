@@ -9,8 +9,12 @@ from .base import PrecisionPolicy
 
 
 class RandomPolicy(PrecisionPolicy):
-    def __init__(self, available_precisions: List[Precision], seed=None):
-        self.available_precisions = available_precisions
+    def __init__(self, available_precisions: List[Precision] = None, seed=None):
+        self.available_precisions = (
+            available_precisions
+            if available_precisions is not None
+            else list(Precision)
+        )
         self.rng = random.Random(seed)
 
     def select_precision(self, network_stats, model_context, src_dst_pair):

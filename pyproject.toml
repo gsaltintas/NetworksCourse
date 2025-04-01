@@ -5,9 +5,12 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
+    "accelerate>=1.5.2",
     "datasets>=3.4.1",
     "gym>=0.26.2",
     "gymnasium>=1.1.1",
+    "jupyter>=1.1.1",
+    "notebook>=7.3.3",
     "torch>=2.6.0",
     "torchvision>=0.21.0",
     "transformers>=4.49.0",
