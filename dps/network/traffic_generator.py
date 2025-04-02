@@ -4,7 +4,6 @@ import numpy as np
 import time
 import socket
 import datetime
-import pytz # Optional, for timezone output
 import collections # For deque
 
 # Import shared configuration for ports, messages, flow size

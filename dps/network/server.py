@@ -6,8 +6,7 @@ import argparse # Import argparse
 # Import shared configuration for ports, messages, flow size
 import shared_config
 
-# --- Server-Specific Configuration ---
-# HOST is now determined by command-line argument, defaulting to '0.0.0.0'
+# Note: server listen address is passed as a command-line argument
 
 # --- Handler for Data Flows ---
 async def handle_flow_client(reader, writer):
@@ -112,5 +111,3 @@ if __name__ == "__main__":
         asyncio.run(main(args.host))
     except KeyboardInterrupt:
         print("\nServers stopped manually.")
-    # OSError related to binding is now handled within main()
-

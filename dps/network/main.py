@@ -1,7 +1,6 @@
 import asyncio
 import time
 import argparse # For handling command-line arguments
-import sys # For exiting on error
 
 # Import the TrafficGenerator class from our module
 from traffic_generator import TrafficGenerator
@@ -36,7 +35,7 @@ client_config_base = {
 }
 
 # --- Main Application Async Function ---
-async def run_main_app(target_server_host):
+async def run_main_app(args):
     """
     Initializes, runs, monitors, and stops the TrafficGenerator.
 
@@ -46,10 +45,14 @@ async def run_main_app(target_server_host):
     total_runtime = 10.0 # Total duration (seconds) the main script lets the generator run
     check_interval = 0.5 # How often (seconds) the main script queries the generator status
 
+    target_server_host = args.server_host
+
     # --- Create final client config dictionary ---
     client_config = client_config_base.copy() # Start with base defaults
     # Add the server host provided via command line
     client_config['SERVER_HOST'] = target_server_host
+
+    client_config['seed'] = args.seed
 
     # --- Instantiate the Traffic Generator ---
     generator = TrafficGenerator(client_config)
@@ -57,7 +60,6 @@ async def run_main_app(target_server_host):
     try:
         # --- Start Generator ---
         print("Main App: Starting traffic generator...")
-        # Display connection info being used
         print(f"Main App: Target Server Host: {target_server_host}")
         print(f"Main App: Target Flow Port: {shared_config.FLOW_PORT}")
         print(f"Main App: Target Heartbeat Port: {shared_config.HEARTBEAT_PORT}")
@@ -109,7 +111,6 @@ async def run_main_app(target_server_host):
         final_rtt = generator.get_estimated_rtt()
         rtt_ms_str = f"{final_rtt * 1000:.1f} ms" if final_rtt >= 0 else "N/A"
 
-        # Print the summary report
         print("\n--- Generator Final Summary ---")
         print(f"Total flows initiated: {summary['total']}")
         print(f"Completed successfully: {summary['completed']}")
@@ -129,9 +130,8 @@ if __name__ == "__main__":
         'server_host', # Argument name
         help='IP address of the target SMMPP server'
     )
-    # Example of adding more optional arguments:
     # parser.add_argument('--runtime', type=float, default=30.0, help='Total runtime in seconds')
-    # parser.add_argument('--seed', type=int, default=None, help='Random seed for reproducibility')
+    parser.add_argument('--seed', type=int, default=42, help='Random seed for reproducibility')
 
     # Parse the arguments provided when running the script
     args = parser.parse_args()
