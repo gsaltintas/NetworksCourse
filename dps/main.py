@@ -296,8 +296,8 @@ def main():
         config,
         dp_size,
         dp_rank,
-        config.batch_size // config.tensor_parallel_size,
-        config.batch_size // config.tensor_parallel_size,
+        config.batch_size // config.data_parallel_size,
+        config.batch_size // config.data_parallel_size,
         tokenizer,
     )
     total_steps = config.num_train_steps
@@ -309,9 +309,15 @@ def main():
     epochs = math.ceil(total_steps / num_update_steps_per_epoch)
     # Setup progress bar
     progress_bar = tqdm(
-        total=num_update_steps_per_epoch,
+        total=min(total_steps, num_update_steps_per_epoch),
         disable=not is_main_process,
         desc="Training",
+        leave=True,
+    )
+    eval_bar = tqdm(
+        total=len(eval_dataloader),
+        disable=not is_main_process,
+        desc="Evaluation",
         leave=True,
     )
 
@@ -373,10 +379,11 @@ def main():
     )
     logger.info("Starting training")
     model.train()
-    total_loss = 0
     step_count = 0
     # Training loop
     for epoch in range(epochs):
+        total_loss = 0
+        example_cnt = 0
         # Reset the sampler for each epoch
         train_dataloader.sampler.set_epoch(epoch)
         progress_bar.reset()
@@ -392,6 +399,8 @@ def main():
 
             # Normalize loss for gradient accumulation
             loss = loss / config.gradient_accumulation_steps
+            total_loss += loss.item() * len(outputs)
+            example_cnt += len(outputs)
 
             # Backward pass
             loss.backward()
@@ -407,23 +416,34 @@ def main():
 
                 # Log progress
                 step_count += 1
-                progress_bar.update(step_count)
 
-                if is_main_process and config.use_wandb:
-                    wandb.log(
-                        {"loss": loss.item(), "lr": lr_scheduler.get_last_lr()[0]}
-                    )
+                if is_main_process:
+                    progress_bar.update(1)
+                    if config.use_wandb:
+                        wandb.log(
+                            {
+                                "train_step_loss": loss.item(),
+                                "lr": lr_scheduler.get_last_lr()[0],
+                                "grad_step": step_count,
+                            }
+                        )
 
                 # Check if we've reached the total steps
                 if step_count >= total_steps:
                     break
-
+        if is_main_process:
+            wandb.log({"train_loss": total_loss / example_cnt, "epoch": epoch + 1})
         # Evaluate at the end of each epoch
         model.eval()
         eval_loss = 0
         eval_steps = 0
 
-        for eval_batch in eval_dataloader:
+        for i, eval_batch in enumerate(eval_dataloader):
+            if (
+                config.num_eval_samples != -1
+                and i * config.batch_size > config.num_eval_samples
+            ):
+                break
             eval_batch = {k: v.to(model.device) for k, v in eval_batch.items()}
 
             with torch.no_grad():
@@ -431,6 +451,7 @@ def main():
 
             eval_loss += outputs.loss.item()
             eval_steps += 1
+            eval_bar.update(1)
 
         eval_loss /= eval_steps
 
@@ -447,20 +468,25 @@ def main():
     # Clean up
     for hook in backward_hooks:
         hook.remove()
-
-    # Save final model if needed
-    if is_main_process:
-        # Here you would save the model
-        logger.info("Training completed")
-        output_dir = Path(config.output_dir) / f"{config.model_name}-finetuned"
-        output_dir.mkdir(parents=True, exist_ok=True)
-
+    # Add before evaluation
+    if dist.is_initialized():
         dist.barrier()
+
+    if is_main_process:
+        logger.info("Training completed")
+        output_dir = Path(config.output_dir.joinpath(f"{config.model_name}-finetuned"))
+        print(output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        if dist.is_initialized():
+            dist.barrier()
         # TODO: may hang check
         # Save model
         model_to_save = model.module if hasattr(model, "module") else model
         model_to_save.save_pretrained(output_dir)
         tokenizer.save_pretrained(output_dir)
+
+    if dist.is_initialized():
+        dist.destroy_process_group()
 
 
 if __name__ == "__main__":

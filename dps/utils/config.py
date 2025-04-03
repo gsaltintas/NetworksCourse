@@ -138,6 +138,9 @@ class Config:
     reward_accuracy_weight: float = field(
         default=0.3, metadata={"help": "Weight for accuracy in reward function"}
     )
+    num_eval_samples: int = field(
+        default=-1, metadata={"help": "Pass -1 to evaluate on all samples."}
+    )
 
     def __post_init__(self):
         if self.wandb_entity is None:
