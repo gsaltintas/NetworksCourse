@@ -25,7 +25,9 @@ echo ""
 export MASTER_ADDR=$(scontrol show hostnames "$SLURM_JOB_NODELIST" | head -n 1)
 echo "Rank 0 node is at $MASTER_ADDR"
 # Dynamic Ports, also known as Private Ports.
-MASTER_PORT="$(( $SLURM_JOB_ID % 16384 + 49152 ))"
+# MASTER_PORT="$(( $SLURM_JOB_ID % 16384 + 49152 ))"
+# export MASTER_ADDR=$(hostname -I | awk '{print $1}')
+export MASTER_PORT=29500  # Choose an open port
 if ss -tulpn | grep -q ":$MASTER_PORT ";
 then
     # The port we selected is in use, so we'll get a random available port instead.
@@ -38,10 +40,11 @@ export WORLD_SIZE="$(($SLURM_NNODES * $SLURM_GPUS_ON_NODE))"
 echo "WORLD_SIZE = $WORLD_SIZE"
 
 
+
 # NCCL options ----------------------------------------------------------------
 
 # This is needed to print debug info from NCCL, can be removed if all goes well
-# export NCCL_DEBUG=INFO
+export NCCL_DEBUG=INFO
 
 # This is needed to avoid NCCL to use ifiniband, which the cluster does not have
 export NCCL_IB_DISABLE=1
@@ -56,7 +59,7 @@ fi
 # Set this when using the NCCL backend for inter-GPU communication.
 export TORCH_NCCL_BLOCKING_WAIT=1
 # -----------------------------------------------------------------------------
-
+SLURM_JOB_NUM_NODES=$SLURM_NNODES
 # Multi-GPU configuration
 echo ""
 echo "Main script begins via torchrun with host tcp://${MASTER_ADDR}:$MASTER_PORT with backend NCCL"
@@ -67,6 +70,8 @@ else
     echo "Multiple ($SLURM_JOB_NUM_NODES) node training (x$SLURM_GPUS_ON_NODE GPUs per node)"
 fi
 echo ""
+NUM_GPUS=$((SLURM_JOB_NUM_NODES*SLURM_GPUS_ON_NODE))
+echo "endpoint $MASTER_ADDR:$MASTER_PORT"
 # -----------------------------------------------------------------------------
 
 torchrun \
@@ -75,10 +80,6 @@ torchrun \
     --rdzv_id="$SLURM_JOB_ID" \
     --rdzv_backend=c10d \
     --rdzv_endpoint="$MASTER_ADDR:$MASTER_PORT" \
-  --nnodes=1 \
-  --nproc_per_node=2 \
-  --rdzv_backend=c10d \
-    --rdzv-endpoint=$MASTER_ADDR \
   dps/main.py \
   --master_addr=$MASTER_ADDR \
   --master_port=$MASTER_PORT \
@@ -86,16 +87,18 @@ torchrun \
   --dataset="tatsu-lab/alpaca" \
   --output_dir="./output" \
   --batch_size=8 \
+  --num_eval_samples=800 \
   --tensor_parallel_size=2 \
   --data_parallel_size=1 \
-  --num_gpus=2 \
+  --num_gpus=$NUM_GPUS \
   --log_level="INFO" \
   --learning_rate=2e-5 \
   --weight_decay=0.01 \
   --num_train_steps=100 \
   --lr_scheduler="cosine" \
   --warmup_ratio=0.1 \
-  --gradient_accumulation_steps=1 \
+  --gradient_accumulation_steps=4 \
+  --use_wandb=true \
     "${@}" &
 child="$!"
 wait "$child"
