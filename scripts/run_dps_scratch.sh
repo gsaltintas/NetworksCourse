@@ -13,8 +13,8 @@ pwd; hostname; date
 
 source .venv/bin/activate
 
-# MODEL="meta-llama/Llama-3.2-1B-Instruct"
-MODEL="/model-weights/Llama-3.2-1B-Instruct"
+MODEL="meta-llama/Llama-3.2-1B-Instruct"
+# MODEL="/model-weights/Llama-3.2-1B-Instruct"
 
 # Set the JOB_LABEL environment variable
 echo "-------- Setting JOB_LABEL ---------------------------------------------"
@@ -37,9 +37,7 @@ echo ""
 export MASTER_ADDR=$(scontrol show hostnames "$SLURM_JOB_NODELIST" | head -n 1)
 echo "Rank 0 node is at $MASTER_ADDR"
 # Dynamic Ports, also known as Private Ports.
-# MASTER_PORT="$(( $SLURM_JOB_ID % 16384 + 49152 ))"
-# export MASTER_ADDR=$(hostname -I | awk '{print $1}')
-export MASTER_PORT=29500  # Choose an open port
+MASTER_PORT="$(( $SLURM_JOB_ID % 16384 + 49152 ))"
 if ss -tulpn | grep -q ":$MASTER_PORT ";
 then
     # The port we selected is in use, so we'll get a random available port instead.
@@ -52,11 +50,10 @@ export WORLD_SIZE="$(($SLURM_NNODES * $SLURM_GPUS_ON_NODE))"
 echo "WORLD_SIZE = $WORLD_SIZE"
 
 
-
 # NCCL options ----------------------------------------------------------------
 
 # This is needed to print debug info from NCCL, can be removed if all goes well
-export NCCL_DEBUG=INFO
+# export NCCL_DEBUG=INFO
 
 # This is needed to avoid NCCL to use ifiniband, which the cluster does not have
 export NCCL_IB_DISABLE=1
@@ -73,7 +70,7 @@ export TORCH_NCCL_BLOCKING_WAIT=1
 
 export OMP_NUM_THREADS=1
 # -----------------------------------------------------------------------------
-SLURM_JOB_NUM_NODES=$SLURM_NNODES
+
 # Multi-GPU configuration
 echo ""
 echo "Main script begins via torchrun with host tcp://${MASTER_ADDR}:$MASTER_PORT with backend NCCL"
@@ -84,8 +81,6 @@ else
     echo "Multiple ($SLURM_JOB_NUM_NODES) node training (x$SLURM_GPUS_ON_NODE GPUs per node)"
 fi
 echo ""
-NUM_GPUS=$((SLURM_JOB_NUM_NODES*SLURM_GPUS_ON_NODE))
-echo "endpoint $MASTER_ADDR:$MASTER_PORT"
 # -----------------------------------------------------------------------------
 
 for node_idx in $(seq 0 $((${SLURM_JOB_NUM_NODES} - 1))); do
@@ -105,8 +100,6 @@ for node_idx in $(seq 0 $((${SLURM_JOB_NUM_NODES} - 1))); do
   --output_dir="./output" \
   --batch_size=8 \
   --tensor_parallel_size=${SLURM_JOB_NUM_NODES} \
-  --num_eval_samples=800 \
-  --tensor_parallel_size=2 \
   --data_parallel_size=1 \
   --num_gpus=${SLURM_JOB_NUM_NODES} \
   --log_level="INFO" \
@@ -117,6 +110,8 @@ for node_idx in $(seq 0 $((${SLURM_JOB_NUM_NODES} - 1))); do
   --warmup_ratio=0.1 \
   --use_wandb=True \
   --gradient_accumulation_steps=1 \
+  --from_scratch=True \
+  --policy="random" \
     "${@}" &
 done
 

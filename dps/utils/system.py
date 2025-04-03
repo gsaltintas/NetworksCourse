@@ -12,7 +12,7 @@ class Hosts(str, Enum):
 def get_host():
     # Get hostname
     hostname = socket.gethostname()
-    if "vremote" in hostname or re.match(r"gpu.*\.cluster\.local", hostname):
+    if "vremote" in hostname or re.match(r"gpu.*(?:\.cluster\.local)?", hostname):
         return Hosts.vector
     # TODO: for dcs
     elif "guppy" in hostname:
