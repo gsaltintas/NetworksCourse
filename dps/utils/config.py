@@ -81,8 +81,10 @@ class Config:
     )
 
     # Precision settings
-    precision_policy: Literal["random", "constant", "heuristic", "transition", "rl"] = field(
-        default="constant", metadata={"help": "Precision selection policy to use"}
+    precision_policy: Literal["random", "constant", "heuristic", "transition", "rl"] = (
+        field(
+            default="constant", metadata={"help": "Precision selection policy to use"}
+        )
     )
     precision_formats: str = field(
         default="FP32,FP16,FP8,INT4,INT2",
@@ -165,7 +167,9 @@ class Config:
             from datetime import datetime
 
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            self.experiment_name = f"dps_{self.model_name}_{timestamp}"
+            self.experiment_name = (
+                f"dps_{self.precision_policy}_{self.model_name}_{timestamp}"
+            )
 
         self.experiment_dir = self.save_dir / self.experiment_name
         self.experiment_dir.mkdir(parents=True, exist_ok=True)
