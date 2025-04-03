@@ -79,13 +79,15 @@ class Config:
     model_size: Literal["tiny", "small", "medium", "large"] = field(
         default="medium", metadata={"help": "Size of the model"}
     )
-
+    model_precision: Literal["FP32", "bfloat16"] = field(
+        default="FP32", metadata={"help": "What precision to load the model as"}
+    )
     # Precision settings
     precision_policy: Literal["random", "constant", "heuristic", "transition", "rl"] = field(
         default="constant", metadata={"help": "Precision selection policy to use"}
     )
     precision_formats: str = field(
-        default="FP32,FP16,FP8,INT4,INT2",
+        default="FP32,FP16,FP8",
         metadata={"help": "Comma-separated list of available precision formats"},
     )
     high_congestion_threshold: float = field(
@@ -99,11 +101,11 @@ class Config:
         metadata={"help": "Factor to increase precision importance in backward pass"},
     )
     eval_dtype: Literal["bfloat16", "float16", "float32"] = field(
-        default="bfloat16",
+        default="float32",
         metadata={"help": "Floating point number format used for evaluation"},
     )
     constant_dtype: Literal["bfloat16", "float16", "float32"] = field(
-        default="bfloat16",
+        default="float32",
         metadata={
             "help": "Floating point number format used for constant policy, only takes effect if policy == constant."
         },

@@ -1,9 +1,9 @@
-import logging
 import math
 import os
 import random
 import sys
 from dataclasses import asdict
+import socket
 from pathlib import Path
 
 import numpy as np
@@ -14,7 +14,6 @@ from datasets import load_dataset
 from torch.utils.data import DataLoader, DistributedSampler
 from tqdm.auto import tqdm
 from transformers import HfArgumentParser, default_data_collator, get_scheduler
-import contextual_logger
 
 from dps.scheduler import DynamicPrecisionScheduler
 from dps.training.allreduce import (
@@ -25,7 +24,7 @@ from dps.utils.config import Config
 from dps.utils.logs import setup_logging
 from dps.utils.model_utils import load_model, load_tokenizer
 
-logger = logging.getLogger("dps")
+logger = None
 
 
 def prepare_datasets(
@@ -240,8 +239,9 @@ def main():
     local_rank = int(os.environ.get("LOCAL_RANK", -1))
     world_size = int(os.environ.get("WORLD_SIZE", 1))
 
-    setup_logging(config.log_level)
-    with logger(rank=rank, local_rank=local_rank, world_size=world_size):
+    global logger
+    logger = setup_logging(config.log_level)
+    with logger(rank=rank, local_rank=local_rank, world_size=world_size, hostname=socket.gethostname()):
 
         assert config.data_parallel_size * config.tensor_parallel_size == config.num_gpus, (
             f"Please check your distributed arguments: num_gpus {config.num_gpus} should be data_parallel_size {config.data_parallel_size} * tensor_parallel_size {config.tensor_parallel_size}"

@@ -27,3 +27,8 @@ def setup_logging(log_level: str, name: str = "dps"):
     stream_handler.setFormatter(formatter)
     logger.addHandler(stream_handler)
     return logger
+
+
+def get_logger(name: str = "dps"):
+    """Utility function to ensure contextual logger is loaded."""
+    return logging.getLogger(name)
