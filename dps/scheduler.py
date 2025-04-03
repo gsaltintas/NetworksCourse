@@ -34,9 +34,14 @@ class DynamicPrecisionScheduler:
     ):
         dps_policy = None
         if policy == "random":
-            dps_policy = RandomPolicy(seed=self.config.seed, available_precisions=kwargs.get("available_precisions"))
+            dps_policy = RandomPolicy(
+                seed=self.config.seed,
+                available_precisions=kwargs.get("available_precisions")
+            )
         elif policy == "constant":
-            dps_policy = ConstantPolicy(self.config.constant_dtype)
+            dps_policy = ConstantPolicy(
+                self.config.constant_dtype
+            )
         elif policy == "heuristic":
             dps_policy = NetworkAwareHeuristicPolicy(
                 high_congestion_threshold=self.config.high_congestion_threshold,
@@ -48,7 +53,7 @@ class DynamicPrecisionScheduler:
             raise NotImplementedError("RL is under development")
         else:
             raise NotImplementedError(f"Invalid policy value {policy}.")
-        logger.info("Making precision decisions based on: %s", dps_policy.__class__.__name__)
+        logger.info("Making precision decisions based on: %s", dps_policy)
         self.policy = dps_policy
 
     def setup_network_monitor(
