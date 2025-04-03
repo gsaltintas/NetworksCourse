@@ -1,6 +1,7 @@
 import asyncio
 import time
 import argparse # For handling command-line arguments
+import csv  # Import CSV module for file output
 
 # Import the TrafficGenerator class from our module
 from traffic_generator import TrafficGenerator
@@ -12,7 +13,7 @@ import shared_config
 # SERVER_HOST is now provided via command-line argument.
 client_config_base = {
     'CLIENT_TIMEOUT_SECONDS': 10.0,         # Timeout for network operations (connect, send, receive ACK)
-    'HEARTBEAT_INTERVAL_SECONDS': 0.1,      # Frequency of sending PING messages
+    'HEARTBEAT_INTERVAL_SECONDS': 0.01,      # Frequency of sending PING messages
     'RTT_EMA_ALPHA': 0.5,                 # Smoothing factor for RTT estimate (lower = smoother, slower reaction)
     'RTT_WINDOW_SIZE': 5,                  # Number of recent RTT samples to store in memory
     'seed': 42,                             # Random seed for SMMPP reproducibility (set to None for non-reproducible runs)
@@ -23,14 +24,14 @@ client_config_base = {
     'STATE_HIGH': 2,
     # --- SMMPP Parameters ---
     # LAMBDAS: Average number of flow start attempts per second for each state
-    'LAMBDAS': {0: 0, 1: 5, 2: 50},
+    'LAMBDAS': {0: 10, 1: 20, 2: 50},
     # DURATION_PARAMS: Pareto distribution parameters (shape 'a', scale 'm' in seconds) for state durations
-    'DURATION_PARAMS': {0: (1.3, 0.5), 1: (1.5, 0.2), 2: (1.1, 0.05)},
+    'DURATION_PARAMS': {0: (1.3, 0.2), 1: (1.5, 0.6), 2: (1.1, 0.3)},
     # TRANSITION_PROBS: Probability of transitioning from State_Row to State_Col after duration ends
     'TRANSITION_PROBS': {
         0: {1: 0.4, 2: 0.6},                # From OFF state
         1: {0: 0.1, 1: 0.3, 2: 0.6},        # From LOW state
-        2: {0: 0.1, 1: 0.7, 2: 0.2}         # From HIGH state
+        2: {0: 0.1, 1: 0.6, 2: 0.3}         # From HIGH state
     }
 }
 
@@ -42,8 +43,8 @@ async def run_main_app(args):
     Args:
         target_server_host (str): The IP address of the server to connect to.
     """
-    total_runtime = 10.0 # Total duration (seconds) the main script lets the generator run
-    check_interval = 0.5 # How often (seconds) the main script queries the generator status
+    total_runtime = 20.0 # Total duration (seconds) the main script lets the generator run
+    check_interval = 0.1 # How often (seconds) the main script queries the generator status
 
     target_server_host = args.server_host
 
@@ -56,6 +57,13 @@ async def run_main_app(args):
 
     # --- Instantiate the Traffic Generator ---
     generator = TrafficGenerator(client_config)
+    
+    # Create CSV file for logging data
+    csv_filename = f"flow_data_{time.strftime('%Y%m%d_%H%M%S')}.csv"
+    csv_file = open(csv_filename, 'w', newline='')
+    csv_writer = csv.writer(csv_file)
+    # Write header row
+    csv_writer.writerow(['Elapsed Time (s)', 'Ongoing Flows', 'RTT (ms)'])
 
     try:
         # --- Start Generator ---
@@ -63,6 +71,7 @@ async def run_main_app(args):
         print(f"Main App: Target Server Host: {target_server_host}")
         print(f"Main App: Target Flow Port: {shared_config.FLOW_PORT}")
         print(f"Main App: Target Heartbeat Port: {shared_config.HEARTBEAT_PORT}")
+        print(f"Main App: Logging data to {csv_filename}")
         if client_config.get('seed') is not None:
              print(f"Main App: Using random seed: {client_config['seed']}")
 
@@ -80,12 +89,18 @@ async def run_main_app(args):
             # Query the generator for current status
             count = generator.get_ongoing_flow_count()
             estimated_rtt = generator.get_estimated_rtt()
+            elapsed_time = time.perf_counter() - start_time
 
             # Format RTT for display (handle initial -1 case)
             rtt_ms_str = f"{estimated_rtt * 1000:.1f} ms" if estimated_rtt >= 0 else "N/A"
+            rtt_ms = estimated_rtt * 1000 if estimated_rtt >= 0 else None
+            
+            # Write data to CSV file
+            csv_writer.writerow([f"{elapsed_time:.3f}", count, rtt_ms])
+            
             # Print the periodic status update
-            print(f"--- [{time.perf_counter():.3f}] MAIN APP CHECK: "
-                  f"{count} flows ongoing | Est. RTT: {rtt_ms_str} ---")
+            # print(f"--- [{elapsed_time:.3f}] MAIN APP CHECK: "
+            #       f"{count} flows ongoing | Est. RTT: {rtt_ms_str} ---")
 
         print(f"Main App: Desired runtime ({total_runtime}s) finished.")
 
@@ -97,6 +112,10 @@ async def run_main_app(args):
         print(f"Main App: An error occurred: {e}")
         # Ensure cleanup happens even if the main loop errors out
     finally:
+        # Close the CSV file
+        csv_file.close()
+        print(f"Main App: Data logged to {csv_filename}")
+        
         # --- Stop Generator and Cleanup ---
         print("Main App: Stopping traffic generator...")
         # Determine timeout for waiting for active flows during stop
@@ -140,7 +159,7 @@ if __name__ == "__main__":
     print(f"Starting Main Application, targeting server: {args.server_host}")
     try:
         # Run the main asynchronous function, passing the parsed server host
-        asyncio.run(run_main_app(args.server_host))
+        asyncio.run(run_main_app(args))
     except KeyboardInterrupt:
         # Handle Ctrl+C gracefully during execution
         print("\nMain Application stopped manually.")
