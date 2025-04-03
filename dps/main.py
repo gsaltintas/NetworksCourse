@@ -117,10 +117,14 @@ def prepare_datasets(
     )
 
     logger.info(
-        "Validation dataset size: %d (sharded across %d DP groups)", len(tokenized_datasets["test"]), dp_size
+        "Validation dataset size: %d (sharded across %d DP groups)",
+        len(tokenized_datasets["test"]),
+        dp_size,
     )
     logger.info(
-        "Train dataset size: %d (sharded across %d DP groups)", len(tokenized_datasets["train"]), dp_size
+        "Train dataset size: %d (sharded across %d DP groups)",
+        len(tokenized_datasets["train"]),
+        dp_size,
     )
 
     return train_dataloader, eval_dataloader
@@ -255,7 +259,9 @@ def main():
         hostname=socket.gethostname(),
     ):
         if config.data_parallel_size * config.tensor_parallel_size != config.num_gpus:
-            raise ValueError(f"Please check your distributed arguments: num_gpus {config.num_gpus} should be data_parallel_size {config.data_parallel_size} * tensor_parallel_size {config.tensor_parallel_size}")
+            raise ValueError(
+                f"Please check your distributed arguments: num_gpus {config.num_gpus} should be data_parallel_size {config.data_parallel_size} * tensor_parallel_size {config.tensor_parallel_size}"
+            )
         # Setup
         set_seed(config.seed, local_rank)
 
@@ -431,7 +437,7 @@ def main():
 
                     # Log progress
                     step_count += 1
-                    progress_bar.update(step_count)
+                    progress_bar.update(1)
 
                     if is_main_process and config.use_wandb:
                         wandb.log(
