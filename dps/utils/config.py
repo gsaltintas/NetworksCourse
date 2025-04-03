@@ -12,8 +12,14 @@ class Config:
     model_name: str = field(
         default="resnet20", metadata={"help": "Base model used for generation"}
     )
+    from_scratch: bool = field(
+        default="false", metadata={"help": "Should we train the model from scratch?"}
+    )
     dataset: str = field(
         default="mnist", metadata={"help": "Dataset to use for training"}
+    )
+    dataset_config: str | None = field(
+        default=None, metadata={"help": "The dataset config to use for training."}
     )
     use_wandb: bool = field(
         default=False, metadata={"help": "Whether to use Weights & Biases for logging"}
@@ -75,7 +81,7 @@ class Config:
     )
 
     # Precision settings
-    precision_policy: Literal["random", "constant", "heuristic", "rl"] = field(
+    precision_policy: Literal["random", "constant", "heuristic", "transition", "rl"] = field(
         default="constant", metadata={"help": "Precision selection policy to use"}
     )
     precision_formats: str = field(

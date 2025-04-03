@@ -13,8 +13,8 @@ pwd; hostname; date
 
 source .venv/bin/activate
 
-# MODEL="meta-llama/Llama-3.2-1B-Instruct"
-MODEL="/model-weights/Llama-3.2-1B-Instruct"
+MODEL="meta-llama/Llama-3.2-1B-Instruct"
+# MODEL="/model-weights/Llama-3.2-1B-Instruct"
 
 # Set the JOB_LABEL environment variable
 echo "-------- Setting JOB_LABEL ---------------------------------------------"
@@ -110,6 +110,7 @@ for node_idx in $(seq 0 $((${SLURM_JOB_NUM_NODES} - 1))); do
   --warmup_ratio=0.1 \
   --use_wandb=True \
   --gradient_accumulation_steps=1 \
+  --from_scratch=True \
     "${@}" &
 done
 

@@ -1,3 +1,4 @@
+import logging
 from typing import Literal
 
 import torch
@@ -6,7 +7,10 @@ from dps.network.monitor import NetworkMonitor, Topology
 from dps.policies.constant_policy import ConstantPolicy
 from dps.policies.network_aware_policy import NetworkAwareHeuristicPolicy
 from dps.policies.random_policy import RandomPolicy
+from dps.policies.transition_policy import TransitionPolicy
 from dps.utils.precision import Precision, map_to_dtype
+
+logger = logging.getLogger("dps")
 
 
 class DynamicPrecisionScheduler:
@@ -25,7 +29,7 @@ class DynamicPrecisionScheduler:
 
     def setup_policy(
         self,
-        policy: Literal["random", "constant", "rl", "heuristic"],
+        policy: Literal["random", "constant", "rl", "heuristic", "transition"],
     ):
         dps_policy = None
         if policy == "random":
@@ -37,10 +41,13 @@ class DynamicPrecisionScheduler:
                 high_congestion_threshold=self.config.high_congestion_threshold,
                 extreme_congestion_threshold=self.config.extreme_congestion_threshold,
             )
+        elif policy == "transition":
+            dps_policy = TransitionPolicy()
         elif policy == "rl":
             raise NotImplementedError("RL is under development")
         else:
             raise NotImplementedError(f"Invalid policy value {policy}.")
+        logger.info("Making precision decisions based on: %s", dps_policy.__class__.__name__)
         self.policy = dps_policy
 
     def setup_network_monitor(
@@ -84,6 +91,7 @@ class DynamicPrecisionScheduler:
             model_context=model_context,
             src_dst_pair=(src_device, dst_device),
         )
+        logger.debug("Selected Precision: %s", precision)
 
         if return_dtype:
             return map_to_dtype(precision)

@@ -131,6 +131,9 @@ class DynamicPrecisionTPLinearLayer(torch.nn.Module):
             # Update input dimension
             self.in_features = end_idx - start_idx
 
+        self.start_idx = start_idx
+        self.end_idx = end_idx
+
     def forward(self, x):
         """Forward pass with dynamic precision all-reduce for row-wise parallelism"""
         # Regular linear operation
@@ -168,6 +171,11 @@ class DynamicPrecisionTPLinearLayer(torch.nn.Module):
         """Set the layer name for better logging and tracking"""
         self.layer_name = name
         return self
+
+    def extra_repr(self):
+        shard = "col" if self.split_dim == 0 else "row"
+        return f"shard={shard}, in_features={self.in_features}, out_features={self.out_features} start={self.start_idx}, end={self.end_idx}"
+
 
 
 def apply_dynamic_precision_tp(model, tp_group, tp_size, tp_rank, scheduler=None):
