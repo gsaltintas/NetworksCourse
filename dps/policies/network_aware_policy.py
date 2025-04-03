@@ -1,10 +1,11 @@
+""" A heuristic based basic policy that based on a predefined threshold determines the precision to use """
+
 from typing import Dict
 
 from dps.utils.precision import Precision
 
 from .base import PrecisionPolicy
 
-""" A heuristic based basic policy that based on a predefined threshold determines the precision to use """
 
 
 class NetworkAwareHeuristicPolicy(PrecisionPolicy):
@@ -14,6 +15,9 @@ class NetworkAwareHeuristicPolicy(PrecisionPolicy):
         # thresholds define when to switch precisions based on network conditions
         self.high_congestion_threshold = high_congestion_threshold
         self.extreme_congestion_threshold = extreme_congestion_threshold
+
+    def extra_repr(self):
+        return f"high_congestion_threshold={self.high_congestion_threshold}, extreme_congestion_threshold={self.extreme_congestion_threshold}"
 
     def select_precision(self, network_stats, model_context, src_dst_pair):
         # Determine precision based on network conditions

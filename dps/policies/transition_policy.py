@@ -10,8 +10,10 @@ from .base import PrecisionPolicy
 
 
 class TransitionPolicy(PrecisionPolicy):
-    def __init__(self, seed=None):
+    def __init__(self, seed=None, include_bfloat16: bool = True):
         self.rng = random.Random(seed)
+        self.seed = seed
+        self.include_bfloat16 = include_bfloat16
         self.current_precision = Precision.FP32
         self.precision_mapping = {
             Precision.FP32: 0,
@@ -26,6 +28,9 @@ class TransitionPolicy(PrecisionPolicy):
             [25, 5, 64, 5],
             [10, 40, 40, 10],
         ])
+
+    def extra_repr(self):
+        return f"include_bfloat16={self.include_bfloat_16}, seed={self.seed}, transition_matrix={self.transition_matrix}"
 
     def select_precision(self, network_stats, model_context, src_dst_pair):
         state = self.transition_matrix[self.precision_mapping[self.current_precision]]

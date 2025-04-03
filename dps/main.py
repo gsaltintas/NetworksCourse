@@ -37,11 +37,12 @@ def prepare_datasets(
     tokenizer,
 ):
     """Load and prepare the datasets."""
-    logger.info(f"Loading dataset from {config.dataset}.")
+    logger.info("Loading dataset from %s", config.dataset)
 
     # Load the dataset
     datasets = load_dataset(config.dataset, config.dataset_config)
     if "test" not in datasets:
+        logger.info("'test' split not in dataset, saving 20 percent for testing.")
         split_dataset = datasets["train"].train_test_split(test_size=0.2, seed=42)
         datasets["train"] = split_dataset["train"]
         datasets["test"] = split_dataset["test"]
@@ -68,6 +69,8 @@ def prepare_datasets(
 
         return tokenized
 
+    # We don't do packing/chunking.
+    logger.info("Tokenizing Dataset.")
     tokenized_datasets = datasets.map(
         preprocess_function,
         batched=True,
@@ -114,10 +117,10 @@ def prepare_datasets(
     )
 
     logger.info(
-        f"Validation dataset size: {len(tokenized_datasets['test'])} (sharded across {dp_size} DP groups)"
+        "Validation dataset size: %d (sharded across %d DP groups)", len(tokenized_datasets["test"]), dp_size
     )
     logger.info(
-        f"Train dataset size: {len(tokenized_datasets['train'])} (sharded across {dp_size} DP groups)"
+        "Train dataset size: %d (sharded across %d DP groups)", len(tokenized_datasets["train"]), dp_size
     )
 
     return train_dataloader, eval_dataloader
@@ -129,6 +132,7 @@ def parallelize_model_with_tp(
 ):
     """Apply tensor parallelism with custom allreduce"""
 
+    # TODO: Don't recalculate all these?
     # Calculate sizes
     tp_size = min(config.tensor_parallel_size, world_size)
     dp_size = min(config.data_parallel_size, world_size // tp_size)
@@ -166,6 +170,7 @@ def parallelize_model_with_tp(
                 )
             ):
                 # Column-wise splitting (output dimension)
+                logger.info("Partitioning %s column-wise (dim=0)", name)
                 tp_layer = DynamicPrecisionTPLinearLayer(
                     module,
                     tp_mesh.get_group(),
@@ -181,6 +186,7 @@ def parallelize_model_with_tp(
                 for pattern in ("o_proj", "out_proj", "output", "down_proj")
             ):
                 # Row-wise splitting (input dimension)
+                logger.info("Partitioning %s row-wise (dim=1)", name)
                 tp_layer = DynamicPrecisionTPLinearLayer(
                     module,
                     tp_mesh.get_group(),
@@ -194,9 +200,9 @@ def parallelize_model_with_tp(
     # Apply FSDP if desired
     try:
         model = dist.fsdp.fully_shard(model, mesh=dp_mesh)
-        logger.info("Model sharded with FSDP")
-    except Exception as e:
-        logger.warning(f"Error applying FSDP: {e}")
+        logger.info("Model sharded with FSDP.")
+    except:
+        logger.exception("Error applying FSDP")
         # Fallback to DDP
         model = torch.nn.parallel.DistributedDataParallel(
             model,
@@ -204,7 +210,7 @@ def parallelize_model_with_tp(
             output_device=local_rank,
             process_group=dp_mesh.get_group(),
         )
-        logger.info("Model wrapped with DDP")
+        logger.info("Model wrapped with DDP.")
 
     return model, dp_rank, tp_rank
 
@@ -248,15 +254,12 @@ def main():
         world_size=world_size,
         hostname=socket.gethostname(),
     ):
-        assert (
-            config.data_parallel_size * config.tensor_parallel_size == config.num_gpus
-        ), (
-            f"Please check your distributed arguments: num_gpus {config.num_gpus} should be data_parallel_size {config.data_parallel_size} * tensor_parallel_size {config.tensor_parallel_size}"
-        )
+        if config.data_parallel_size * config.tensor_parallel_size != config.num_gpus:
+            raise ValueError(f"Please check your distributed arguments: num_gpus {config.num_gpus} should be data_parallel_size {config.data_parallel_size} * tensor_parallel_size {config.tensor_parallel_size}")
         # Setup
         set_seed(config.seed, local_rank)
-        #####
-        """Initialize distributed training with tensor parallelism."""
+
+        # Initialize distributed training with tensor parallelism.
         # In a distributed environment, only log from process 0
         is_main_process = local_rank == 0
 
@@ -281,11 +284,13 @@ def main():
 
         #  Set device
         device = torch.device("cuda", local_rank)
+
         # Initialize wandb if requested and this is the main process
         if config.use_wandb and is_main_process:
             wandb.init(
-                project="networks-lm-finetuning",
-                name=f"{config.model_name}-finetuning",
+                project=config.wandb_project,
+                # Is that what wandb_entity was for?
+                name=config.wandb_name or "{config.model_name}-{config.dataset}",
                 config=asdict(config),
             )
 
@@ -352,7 +357,7 @@ def main():
         # Json logging squashes the output so print it too.
         print(f"Model after parallelization {model}")
 
-        no_decay = ["bias", "LayerNorm.weight"]
+        no_decay = ("bias", "LayerNorm.weight")
         optimizer_grouped_parameters = [
             {
                 "params": [
@@ -376,12 +381,14 @@ def main():
             optimizer_grouped_parameters,
             lr=config.learning_rate,  # foreach=True
         )
+        logger.info("Using optimizer: %s", optimizer)
         lr_scheduler = get_scheduler(
             name=config.lr_scheduler,
             optimizer=optimizer,
             num_warmup_steps=int(config.warmup_ratio * total_steps),
             num_training_steps=total_steps,
         )
+        logger.info("Using LR Scheduler: %s", lr_scheduler)
         logger.info("Starting training")
         model.train()
         total_loss = 0

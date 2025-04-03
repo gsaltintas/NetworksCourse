@@ -12,3 +12,9 @@ class PrecisionPolicy:
             Precision enum value
         """
         raise NotImplementedError
+
+    def extra_repr(self):
+        return ""
+
+    def __str__(self):
+        return f"{self.__class__.__name__}({self.extra_repr()})"

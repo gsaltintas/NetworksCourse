@@ -1,9 +1,11 @@
+import time
 import torch
 import torch.distributed as dist
 
 from dps.network.monitor import NetworkMonitor
 from dps.scheduler import DynamicPrecisionScheduler
 from dps.utils.precision import Precision, map_to_dtype
+from dps.utils import logs
 
 
 def dynamic_precision_allreduce(
@@ -64,7 +66,11 @@ def dynamic_precision_allreduce(
         send_converted = send.clone()
 
     # Use standard all_reduce for reliability
+    tic = time.time()
     dist.all_reduce(send_converted, op=dist.ReduceOp.SUM, group=process_group)
+    toc = teim.time()
+    logger = logs.get_logger()
+    logger.debug("Communication took %.4f", toc - tic)
 
     # Convert back to original precision if needed
     if communication_dtype != send.dtype:

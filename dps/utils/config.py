@@ -28,6 +28,8 @@ class Config:
     wandb_entity: Optional[str] = field(
         default=None, metadata={"help": "W&B entity name"}
     )
+    wandb_name: Optional[str] = field(
+        default=None, metadata={"help": "W&B name for the graph"})
     seed: int = field(default=42, metadata={"help": "Random seed for reproducibility"})
     save_dir: Path = field(
         default=Path("./results"), metadata={"help": "Directory to save results"}

@@ -16,9 +16,11 @@ class RandomPolicy(PrecisionPolicy):
             if available_precisions is not None
             else list(Precision)
         )
-        logger = logs.get_logger()
-        logger.info("Selecting from %s available precisions", self.available_precisions)
         self.rng = random.Random(seed)
+        self.seed = seed
+
+    def extra_repr(self):
+        return f"available_precisions={self.available_precisions}, seed={self.seed}"
 
     def select_precision(self, network_stats, model_context, src_dst_pair):
         # Randomly select precision regardless of input

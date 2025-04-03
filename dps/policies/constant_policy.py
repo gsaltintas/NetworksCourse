@@ -15,5 +15,8 @@ class ConstantPolicy(PrecisionPolicy):
     ):
         self.base_precision = base_precision
 
+    def extra_repr(self):
+        return f"base_precision={self.base_precision}"
+
     def select_precision(self, network_stats, model_context, src_dst_pair):
         return self.base_precision
