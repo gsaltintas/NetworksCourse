@@ -96,7 +96,7 @@ for node_idx in $(seq 0 $((${SLURM_JOB_NUM_NODES} - 1))); do
   --master_port=${MASTER_PORT} \
   --model_name=${MODEL} \
   --dataset="wikitext" \
-  --dataset_subset="wikitext-2-raw-v1" \
+  --dataset_config="wikitext-2-raw-v1" \
   --output_dir="./output" \
   --batch_size=8 \
   --tensor_parallel_size=${SLURM_JOB_NUM_NODES} \

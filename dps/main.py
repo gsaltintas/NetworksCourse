@@ -14,6 +14,7 @@ from datasets import load_dataset
 from torch.utils.data import DataLoader, DistributedSampler
 from tqdm.auto import tqdm
 from transformers import HfArgumentParser, default_data_collator, get_scheduler
+import contextual_logger
 
 from dps.scheduler import DynamicPrecisionScheduler
 from dps.training.allreduce import (

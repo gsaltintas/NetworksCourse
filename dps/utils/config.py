@@ -13,7 +13,7 @@ class Config:
         default="resnet20", metadata={"help": "Base model used for generation"}
     )
     from_scratch: bool = field(
-        default="false", metadata={"help": "Should we train the model from scratch?"}
+        default=False, metadata={"help": "Should we train the model from scratch?"}
     )
     dataset: str = field(
         default="mnist", metadata={"help": "Dataset to use for training"}

@@ -9,7 +9,7 @@ import numpy as np
 from .base import PrecisionPolicy
 
 
-class TransistionPolicy(PrecisionPolicy):
+class TransitionPolicy(PrecisionPolicy):
     def __init__(self, available_precisions: List[Precision] = None, seed=None):
         self.rng = random.Random(seed)
         self.current_precision = Precision.FP32
