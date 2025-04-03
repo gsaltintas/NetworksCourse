@@ -1,7 +1,7 @@
-import logging
 import math
 import os
 import random
+import socket
 import sys
 from dataclasses import asdict
 from pathlib import Path
@@ -25,7 +25,7 @@ from dps.utils.config import Config
 from dps.utils.logs import setup_logging
 from dps.utils.model_utils import load_model, load_tokenizer
 
-logger = logging.getLogger("dps")
+logger = None
 
 
 def prepare_datasets(
@@ -240,8 +240,14 @@ def main():
     local_rank = int(os.environ.get("LOCAL_RANK", -1))
     world_size = int(os.environ.get("WORLD_SIZE", 1))
 
-    setup_logging(config.log_level)
-    with logger(rank=rank, local_rank=local_rank, world_size=world_size):
+    global logger
+    logger = setup_logging(config.log_level)
+    with logger(
+        rank=rank,
+        local_rank=local_rank,
+        world_size=world_size,
+        hostname=socket.gethostname(),
+    ):
         assert (
             config.data_parallel_size * config.tensor_parallel_size == config.num_gpus
         ), (

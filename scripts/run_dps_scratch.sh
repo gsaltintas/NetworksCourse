@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --partition a40
 #SBATCH --time=12:00:00
-#SBATCH --nodes=4
+#SBATCH --nodes=2
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=4
 #SBATCH --gpus-per-task=1
@@ -90,6 +90,7 @@ for node_idx in $(seq 0 $((${SLURM_JOB_NUM_NODES} - 1))); do
     --rdzv_id="${SLURM_JOB_ID}" \
     --rdzv_backend="c10d" \
     --rdzv_endpoint="${MASTER_ADDR}:${MASTER_PORT}" \
+    --node_rank="${node_idx}" \
     --max-restarts=0 \
   dps/main.py \
   --master_addr=${MASTER_ADDR} \
@@ -111,7 +112,7 @@ for node_idx in $(seq 0 $((${SLURM_JOB_NUM_NODES} - 1))); do
   --use_wandb=True \
   --gradient_accumulation_steps=1 \
   --from_scratch=True \
-  --policy="random" \
+  --precision_policy="random" \
     "${@}" &
 done
 

@@ -4,6 +4,7 @@ import random
 from typing import List
 
 from dps.utils.precision import Precision
+from dps.utils import logs
 
 from .base import PrecisionPolicy
 
@@ -15,6 +16,8 @@ class RandomPolicy(PrecisionPolicy):
             if available_precisions is not None
             else list(Precision)
         )
+        logger = logs.get_logger()
+        logger.info("Selecting from %s available precisions", self.available_precisions)
         self.rng = random.Random(seed)
 
     def select_precision(self, network_stats, model_context, src_dst_pair):

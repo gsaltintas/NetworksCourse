@@ -10,7 +10,7 @@ from .base import PrecisionPolicy
 
 
 class TransitionPolicy(PrecisionPolicy):
-    def __init__(self, available_precisions: List[Precision] = None, seed=None):
+    def __init__(self, seed=None):
         self.rng = random.Random(seed)
         self.current_precision = Precision.FP32
         self.precision_mapping = {

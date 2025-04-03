@@ -1,4 +1,3 @@
-import logging
 from typing import Literal
 
 import torch
@@ -9,8 +8,9 @@ from dps.policies.network_aware_policy import NetworkAwareHeuristicPolicy
 from dps.policies.random_policy import RandomPolicy
 from dps.policies.transition_policy import TransitionPolicy
 from dps.utils.precision import Precision, map_to_dtype
+from dps.utils import logs
 
-logger = logging.getLogger("dps")
+logger = logs.get_logger("dps")
 
 
 class DynamicPrecisionScheduler:
@@ -21,7 +21,7 @@ class DynamicPrecisionScheduler:
         total_steps: int,
     ):
         self.config = config
-        self.setup_policy(config.precision_policy)
+        self.setup_policy(config.precision_policy, available_precisions=config.precision_formats)
         self.setup_network_monitor()
         self.model_info = model_info
         self.training_step = 0
@@ -30,10 +30,11 @@ class DynamicPrecisionScheduler:
     def setup_policy(
         self,
         policy: Literal["random", "constant", "rl", "heuristic", "transition"],
+        **kwargs
     ):
         dps_policy = None
         if policy == "random":
-            dps_policy = RandomPolicy(seed=self.config.seed)
+            dps_policy = RandomPolicy(seed=self.config.seed, available_precisions=kwargs.get("available_precisions"))
         elif policy == "constant":
             dps_policy = ConstantPolicy(self.config.constant_dtype)
         elif policy == "heuristic":
