@@ -267,7 +267,8 @@ def main():
 
         # Initialize distributed training with tensor parallelism.
         # In a distributed environment, only log from process 0
-        is_main_process = local_rank == 0
+        is_main_process = rank == 0
+        # is_main_process = local_rank == 0
 
         # Calculate local ranks and groups
         tp_size = min(config.tensor_parallel_size, world_size)
@@ -296,7 +297,7 @@ def main():
             wandb.init(
                 project=config.wandb_project,
                 # Is that what wandb_entity was for?
-                name=config.wandb_name or "{config.model_name}-{config.dataset}",
+                name=config.experiment_name or f"{config.model_name}-{config.dataset}",
                 config=asdict(config),
             )
 

@@ -1,11 +1,12 @@
 import time
+
 import torch
 import torch.distributed as dist
 
 from dps.network.monitor import NetworkMonitor
 from dps.scheduler import DynamicPrecisionScheduler
-from dps.utils.precision import Precision, map_to_dtype
 from dps.utils import logs
+from dps.utils.precision import Precision, map_to_dtype
 
 
 def dynamic_precision_allreduce(
@@ -68,9 +69,9 @@ def dynamic_precision_allreduce(
     # Use standard all_reduce for reliability
     tic = time.time()
     dist.all_reduce(send_converted, op=dist.ReduceOp.SUM, group=process_group)
-    toc = teim.time()
+    toc = time.time()
     logger = logs.get_logger()
-    logger.debug("Communication took %.4f", toc - tic)
+    logger.debug("Communication with %s took %.4f", communication_dtype, toc - tic)
 
     # Convert back to original precision if needed
     if communication_dtype != send.dtype:
@@ -183,7 +184,6 @@ class DynamicPrecisionTPLinearLayer(torch.nn.Module):
         return f"shard={shard}, in_features={self.in_features}, out_features={self.out_features} start={self.start_idx}, end={self.end_idx}"
 
 
-
 def apply_dynamic_precision_tp(model, tp_group, tp_size, tp_rank, scheduler=None):
     """Apply tensor parallelism with dynamic precision to a transformer model"""
     # Track modules that require parallelization
@@ -275,4 +275,5 @@ def register_backward_hooks(model, scheduler, tp_group):
                 )
                 hooks.append(hook)
 
+    return hooks
     return hooks
