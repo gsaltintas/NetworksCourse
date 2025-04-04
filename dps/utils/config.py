@@ -41,6 +41,7 @@ class Config:
     output_dir: Optional[str] = field(
         default="./results", metadata={"help": "Directory to log training runs to"}
     )
+    save_ckpt: bool = False
     experiment_name: str = field(
         default="dps_default", metadata={"help": "Name for this experiment"}
     )

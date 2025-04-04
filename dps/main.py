@@ -409,7 +409,7 @@ def main():
             progress_bar.reset()
             model.train()
 
-            for step, batch in enumerate(train_dataloader):
+            for step, batch in enumerate(train_dataloader):s
                 # Move batch to device
                 # TODO: which device
                 batch = {k: v.to(model.device) for k, v in batch.items()}
@@ -475,14 +475,14 @@ def main():
                 eval_steps += 1
                 eval_bar.update(1)
 
-                eval_loss /= eval_steps
+            eval_loss /= eval_steps
 
-                if is_main_process:
-                    logger.info(f"Epoch {epoch}: Eval Loss: {eval_loss}")
-                    if config.use_wandb:
-                        wandb.log({"eval_loss": eval_loss, "epoch": epoch})
+            if is_main_process:
+                logger.info(f"Epoch {epoch}: Eval Loss: {eval_loss}")
+                if config.use_wandb:
+                    wandb.log({"eval_step_loss": eval_loss})
 
-                model.train()
+            model.train()
 
             # Break if we've reached total steps
             if step_count >= total_steps:
@@ -494,7 +494,7 @@ def main():
     if dist.is_initialized():
         dist.barrier()
 
-    if is_main_process:
+    if is_main_process and config.save_ckpt:
         logger.info("Training completed")
         output_dir = Path(config.output_dir.joinpath(f"{config.model_name}-finetuned"))
         print(output_dir)
