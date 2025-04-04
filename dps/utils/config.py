@@ -29,7 +29,8 @@ class Config:
         default=None, metadata={"help": "W&B entity name"}
     )
     wandb_name: Optional[str] = field(
-        default=None, metadata={"help": "W&B name for the graph"})
+        default=None, metadata={"help": "W&B name for the graph"}
+    )
     seed: int = field(default=42, metadata={"help": "Random seed for reproducibility"})
     save_dir: Path = field(
         default=Path("./results"), metadata={"help": "Directory to save results"}
@@ -51,6 +52,18 @@ class Config:
         default=4, metadata={"help": "Total number of GPUs available to the job."}
     )
     # Network settings
+    network_mode: Literal["online", "offline"] = field(
+        default=None,
+        metadata={
+            "help": "Online: (WIP) runs network monitor synchronously, Offline: Reads network from a file"
+        },
+    )
+    offline_network_file: Optional[Path] = field(
+        default=None,
+        metadata={
+            "help": "If network mode is offline, you need to specify the file that mimmicks the network. "
+        },
+    )
     network_topology: Literal["flat", "tree", "fattree", "torus"] = field(
         default="fattree", metadata={"help": "Network topology type"}
     )
@@ -70,6 +83,9 @@ class Config:
     )
     congestion_pattern: Literal["random", "periodic", "bursty"] = field(
         default="bursty", metadata={"help": "Pattern of network congestion to simulate"}
+    )
+    congestion_column: Literal["flows", "rtt"] = field(
+        default="flows", metadata={"help": "Column in the offline environment files."}
     )
     high_congestion_threshold: float = field(default=0.8)
     extreme_congestion_threshold: float = field(default=0.9)
@@ -94,9 +110,9 @@ class Config:
         default="FP32,FP16,FP8",
         metadata={"help": "Comma-separated list of available precision formats"},
     )
-    high_congestion_threshold: float = field(
-        default=0.7, metadata={"help": "Threshold for high congestion"}
-    )
+    # high_congestion_threshold: float = field(
+    #     default=0.7, metadata={"help": "Threshold for high congestion"}
+    # )
     medium_congestion_threshold: float = field(
         default=0.4, metadata={"help": "Threshold for medium congestion"}
     )
@@ -183,3 +199,16 @@ class Config:
 
         self.text_column_name = "text"
         self.max_seq_length = 512
+
+        if self.network_mode == "offline":
+            if self.offline_network_file is None:
+                raise ValueError(
+                    "With --network_mode=offline, you must provide an argument for offline_network_file"
+                )
+            self.offline_network_file = self.offline_network_file.resolve().absolute()
+            if not self.offline_network_file.exists():
+                raise ValueError(
+                    f"With --network_mode=offline, you must provide an valid file path for offline_network_file. {self.offline_network_file} doesn't exist."
+                )
+                # todo: maybe check for the column name
+        self.slurm_job_id = os.environ.get("SLURM_JOB_ID", None)
