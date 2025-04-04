@@ -409,7 +409,7 @@ def main():
             progress_bar.reset()
             model.train()
 
-            for step, batch in enumerate(train_dataloader):s
+            for step, batch in enumerate(train_dataloader):
                 # Move batch to device
                 # TODO: which device
                 batch = {k: v.to(model.device) for k, v in batch.items()}
@@ -480,7 +480,7 @@ def main():
             if is_main_process:
                 logger.info(f"Epoch {epoch}: Eval Loss: {eval_loss}")
                 if config.use_wandb:
-                    wandb.log({"eval_step_loss": eval_loss})
+                    wandb.log({"eval_loss": eval_loss})
 
             model.train()
 
