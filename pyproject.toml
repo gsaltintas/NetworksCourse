@@ -9,7 +9,6 @@ dependencies = [
     "datasets>=3.4.1",
     "gym>=0.26.2",
     "gymnasium>=1.1.1",
-    "iperf3>=0.1.11",
     "jupyter>=1.1.1",
     "notebook>=7.3.3",
     "torch>=2.6.0",
@@ -20,6 +19,8 @@ dependencies = [
     "logging-json",
 ]
 
+[project.optional-dependencies]
+network = [ "iperf3>=0.1.11", "flask", "flask-cors", "pandas", "singularity-cli" ]
 
 [build-system]
 requires = ["setuptools>=61.0", "wheel"]
